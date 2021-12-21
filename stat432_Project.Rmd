@@ -1,0 +1,496 @@
+---
+title: "STAT 432 Final Project"
+author: "Shuyu Jia, Yuqi Zhang, Daniel Chernyakhovskiy"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    theme: cosmo
+    toc: yes
+  pdf_document: default
+urlcolor: BrickRed
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = 'center')
+```
+
+```{r load_libraries, message = FALSE}
+
+library("tidyverse")
+library("caret")
+library("knitr")
+library("magrittr")
+library("formattable")
+library("tibble")
+library("kableExtra")
+
+```
+
+***
+
+# Abstract
+
+> Statistical learning models were applied to 1994 US Census Bureau data in order to predict a given person's income class based on a variety of associated attributes. A slew of learning techniques were explored and validated, and a high degree of prediction accuracy was achieved. Our results show promise - meriting further study.
+
+***
+
+# Introduction
+
+The United States Consitution requires that a census be taken in our country every ten years.[^1] The first census was conducted in 1790 - focusing strictly on population count. However, subsequent censuses have expanded their data collection to include statistics on race, health, education, income, the economy, and more. To accomodate this drastic increase in data, the U.S. Census Bureau was formed.[^2] As a part of the Economics and Statistics Administration (ESA) within the Department of Commerce,[^3] the USCB houses one of the most comprehensive national databases in America.
+
+In 1994, the USCB released data from a national survey of households on income. The data classified individuals as either earning above or below **`$50,000`** per year, along with a host of other attributes. A random number at first glance, but **`$50,000`** in 1994 dollars translates to almost **`$87,000`** in 2019 dollars. [^4] As depicted by the chart below, **`$87,000`** sits well within the range of current middle class incomes. As such, while not explicitly stated, it is plausible to conclude that **`$50,000`** was chosen to distinguish between lower and middle class incomes in 1994.
+
+![](howmuch_income.png)
+
+With that said, the goal of this analysis is to create a predictive classifier that can effectively determine a given individual's income class based on their associated attributes. To accomplish this goal, statistical learning techniques were applied.
+
+The results indicate that classification is certainly possible - with a high degree of accuracy. Being able to predict a given person's income class is useful for both an individual and the federal government. For the government, knowing its citizens' financial data allows for proper resource allocation for those in need. And for individuals, understanding their country's economy allows them to navigate the "income mobility ladder" more easily. As such, this analysis proves important.
+
+***
+
+# Methods
+
+## Data
+
+The Census Income dataset, also known as the "Adult" dataset, was extracted from U.S. Census Bureau data collected in 1994. Donated  by Ronny Kohavi and Barry Becker in 1996, [^5] the dataset houses 48842 instances, 14 feature variables, and 1 response variable. The features include information on an individual's `age`, `race`, `educational level`, `workclass`, and more. For more information on the features, see the appendix.
+
+The UCI Machine Learning Repository provided descriptive names for the dataset's variables. However, some cleaning was necessary before modeling. First, we renamed several column names for the sake of comprehension. Next, we changed continuous variable types from `string` to `numeric`. We also modified the `education_num` variable to consistently start counting education level from grade 1.
+
+We also deleted a few variables for the following reasons:
+
+- `age` - A large amount of values are set by default to `1` due to missing survey responses. Including this variable would make modeling more difficult, as the model would assume the default age value of one year old.
+- `fnlwgt` - Represents final weight, which is the number of units in the target population that the responding unit typifies. It is irrelevant to income classification.
+- `education_num` - Replaced by `years_in_school` for consistency's sake (numeric).
+- `education` - Same as `education_num` but categorical.
+- `native_country` - The majority of individuals in the dataset are U.S. citizens. In addition, immigrants do not necessarily earn differently (on average) than natives.
+
+```{r load_data}
+
+# load data
+adult_data = read.table("adult.data")
+
+```
+
+```{r data_wrangling}
+# Data Wrangling
+income_data = adult_data %>%
+  # change column names into descriptive ones
+  rename(age = V1,
+         workclass = V2,
+         fnlwgt = V3, 
+         education = V4,
+         education_num = V5,  
+         marital_status = V6,
+         occupation = V7,
+         relationship = V8,
+         race = V9,
+         sex = V10,
+         capital_gain = V11,  
+         capital_loss = V12,  
+         hours_per_week = V13,
+         native_country = V14,
+         income = V15) %>%
+  # change data types
+  mutate(age = as.numeric(age),
+         fnlwgt = as.numeric(fnlwgt),
+         education_num = as.numeric(education_num),
+         capital_gain = as.numeric(capital_gain),
+         capital_loss = as.numeric(capital_loss),
+         hours_per_week = as.numeric(hours_per_week),
+         edu_num_adder = as.numeric(ifelse(education == "Assoc-acdm," | education == "Assoc-voc," | education == "Bachelors," |                                                 education == "Doctorate," | education == "Masters," | education == "Prof-school," |                                                  education == "Some-college,", 16, 0)),
+         years_in_school = education_num + edu_num_adder,
+         income = factor(ifelse(income == "<=50K", "low", "high"))) %>%
+  # delete columns
+  select(-c(age, fnlwgt, education, education_num, edu_num_adder, native_country))
+
+```
+
+```{r train_test_split}
+
+set.seed(42)
+idx = createDataPartition(income_data$income, p = 0.8, list = FALSE)
+income_trn = income_data[idx,  ]
+income_tst = income_data[-idx, ]
+
+```
+
+## Modeling
+
+In order to predict a given individual's income class, the following six modeling techniques were considered:  
+
+- Support Vector Machines [^6]
+  + Trained via 5-fold cross validation for binary classification. The best choice of C was chosen among different values by default.
+- Boosted Logistic Regression [^7]
+  + Trained via 5-fold cross validation for  binary classification. The choice of number of boosting iterations was chosen among 3 different values by default.
+- Random Forests [^8]
+  + Trained via out of bag validation for binary classification. The best choice of mtry, splitrule and min.node.size was chosen by default.
+- Gradient Boosting Machines [^9]
+  + Trained via 5-fold cross validation for binary classification. The best choice of the n.trees, interaction.depth, shrinkage and n.minobsinnode was chosen among different values by default.
+- Neural Networks [^10]
+  + Trained via 5-fold cross validation for binary classification. The best choice of size and decay was chosen among different values by default.
+- Naive Bayes [^11]
+  + Trained via 5-fold cross validation for binary classification. The choice of fL, usekernel, and adjust was chosen among different values by default.
+
+Each model was trained using all available predictors. The best tuning parameters were chosen using `accuracy`.
+
+In order to deal with the unbalanced dataset, a well-known resampling method - SMOTE - was used. [^12] The general idea of SMOTE is to up-sample the minority class based on nearest neighbors while down-sampling the majority class.
+
+```{r, rf, message = FALSE, warning = FALSE, results = 'hide', eval = FALSE}
+
+set.seed(42)
+rf_mod = train(
+  income ~ .,
+  data = income_trn,
+  method = "rf",
+  trControl = trainControl(method = "oob", sampling = "smote")
+)
+rf_mod
+
+```
+
+```{r, ranger, message = FALSE, warning = FALSE, results = 'hide', eval = FALSE}
+set.seed(42)
+ranger_mod = train(
+  income ~ .,
+  data = income_trn,
+  method = "ranger",
+  trControl = trainControl(method = "oob", sampling = "smote")
+)
+ranger_mod
+```
+
+```{r, nnet_mod, message = FALSE, warning = FALSE, results = 'hide', eval = FALSE}
+
+set.seed(42)
+nnet_mod = train(
+  income ~ .,
+  data = income_trn,
+  method = "nnet",
+  trControl = trainControl(
+    method = "cv",
+    number = 5,
+    sampling = "smote"
+  )
+)
+nnet_mod
+
+```
+
+```{r, svmLinear, message = FALSE, warning = FALSE, results = 'hide', eval = FALSE}
+
+set.seed(42)
+svmLinear_mod = train(
+  income ~ .,
+  data = income_trn,
+  method = "svmLinear",
+  trControl = trainControl(
+    method = "cv",
+    number = 5,
+    sampling = "smote"
+  )
+)
+svmLinear_mod
+```
+
+```{r, LogitBoost, message = FALSE, warning = FALSE, results = 'hide', eval = FALSE}
+set.seed(42)
+mod_LogitBoost = train(
+  income ~ .,
+  data = income_trn,
+  method = "LogitBoost",
+  trControl = trainControl(
+    method = "cv",
+    number = 5,
+    sampling = "smote"
+  )
+)
+mod_LogitBoost
+```
+
+```{r, gbm, message = FALSE, warning = FALSE, results = 'hide', eval = FALSE}
+set.seed(42)
+mod_gbm = train(
+  income ~ .,
+  data = income_trn,
+  method = "gbm",
+  trControl = trainControl(
+    method = "cv",
+    number = 5,
+    sampling = "smote"
+  )
+)
+mod_gbm
+```
+
+```{r, nb, message = FALSE, warning = FALSE, results = 'hide', eval = FALSE}
+set.seed(42)
+mod_nb = train(income ~ .,
+  data = income_trn,
+  method = "nb",
+  trControl = trainControl(method = "cv",
+                           number = 5,
+                           sampling = "smote")
+)
+mod_nb
+```
+
+## Evaluation
+
+To evaluate the ability to classify a given individual's income class, the data was split into training and testing sets. Accuracy metrics and tuning parameters are reported using the testing data in the Results section.
+
+***
+
+# Results
+
+```{r, results}
+
+tuning = c(
+  "C = 1",
+  "nIter = 31",
+  "mtry = 22, splitrule = gini, and min.node.size = 1",
+  "n.trees = 150, interaction.depth = 3, shrinkage = 0.1, and n.minobsinnode = 10",
+  "size = 5 and decay = 0.1",
+  "fL = 0, usekernel = TRUE, and adjust = 1"
+)
+
+best_acc = c(0.8163844, 0.8274019, 0.9198606, 0.8491301 , 0.8244070, 0.8039482)
+
+acc_results =
+  tibble(
+    "Model Name" = c(
+      "Support Vector Machine", 
+      "Boosted Logistic Regression",
+      "Random Forest",
+      "Gradient Boosting Machine",
+      "Neutral Network",
+      "Naive Bayes"),
+    
+    "Accuracy" = best_acc,
+    
+    "Tuning Parameters" = tuning)
+
+kable(acc_results, digits = 3) %>%
+  kable_styling(
+    bootstrap_options = "striped",
+    full_width = FALSE,
+    position = "center")
+
+```
+
+***
+
+# Discussion
+
+By utilizing a random forest in our analysis, we were able to obtain an accuracy rate as high as **92%**! In other words, our model was able to correctly predict a given individual's income class **92%** of the time. This value is rather large, considering the next best accuracy obtained was about **85%**. As such, it seems that our models are quite powerful. When it comes to predicting income class based on more recent data, it is reasonable to employ similar procedures - given their success here.
+
+Nevertheless, our analysis can always be improved upon. Should new data be discovered, we likely can raise accuracy further. In addition, should more features be added, our results likely will improve as well. Perhaps an individual's weight affects their earnings. Or maybe their sexuality and religious beliefs play a part. By collecting more data and incorporating new attributes, we can minimize bias. It is unlikely that more data will be added to this dataset. However, it is important to ponder these questions as future data is collected.
+
+***
+
+# Appendix
+
+## First 5 observations
+
+```{r, header}
+
+head_inc = head(income_data, n = 5)
+form = as_tibble(lapply(head_inc, gsub, pattern = ",", replacement = ""))
+
+formattable(form)
+
+```
+
+## Variable Descriptions 
+
+```{r, include = FALSE}
+
+names(income_data)
+
+```
+
+- `workclass` - Categorical variable 
+  + Private (Priv)
+  + Self-emp-not-inc (SENI)
+  + Self-emp-inc (SEI)
+  + Federal-gov (FG)
+  + Local-gov (LG)
+  + State-gov (SG)
+  + Without-pay (WP)
+  + Never-worked (NW)
+- `marital_status` - Categorical variable 
+  + Married-civ-spouse (M-C-S)
+  + Divorced (Div)
+  + Never-married (N-M)
+  + Separated (Sep)
+  + Widowed (Wid)
+  + Married-spouse-absent (M-S-A)
+  + Married-AF-spouse (M-AF-S)
+- `occupation` - Categorical variable 
+  + Tech-support (TS)
+  + Craft-repair (CR)
+  + Other-service (OS)
+  + Sales (S)
+  + Exec-managerial (EM)
+  + Prof-specialty (PS)
+  + Handlers-cleaners (HC)
+  + Machine-op-inspct (MOI)
+  + Adm-clerical (AC)
+  + Farming-fishing (FF)
+  + Transport-moving (TM)
+  + Priv-house-serv (PHS)
+  + Protective-serv (PS)
+  + Armed-Forces (AF)
+- `relationship` - Categorical variable 
+  + Wife
+  + Own-child
+  + Husband
+  + Not-in-family
+  + Other-relative
+  + Unmarried
+- `race` - Categorical variable 
+  + White
+  + Asian-Pac-Islander
+  + Amer-Indian-Eskimo
+  + Other
+  + Black
+- `sex` - Binary categorical variable
+  + Female
+  + Male
+- `capital_gain` - Continuous variable
+  + Profit from the sale of property or an investment
+- `capital_loss` - Continuous variable
+  + Loss from the sale of property or an investment
+- `hours_per_week` - Continuous variable 
+  + Hours worked in a week
+- `years_in_school` - Continuous variable
+  + Education years start from elementary school
+- `income` - Binary categorical variable
+  + low
+    + income is `<=` $50K/yr 
+  + high 
+    + income is `>` $50K/yr
+
+## Exploratory Data Analysis
+
+```{r, eda_plot_1}
+
+p01 = ggplot(data = income_data, aes(x = income)) +
+      geom_bar(color=I('black'), fill=I('#099DD9')) +
+      labs(x = "income levels", title = "Income level Distribution (Bar Chart)")
+
+```
+
+```{r, eda_plot_2}
+
+p02 = ggplot(data = income_data, aes(x = marital_status, fill = income)) +
+  geom_bar() +
+  scale_x_discrete(
+    breaks = c("Divorced,", "Married-civ-spouse,", "Never-married,", "Widowed,", "Married-AF-spouse,", "Married-spouse-absent,", "Separated,"),
+    
+    labels = c("Div", "M-C-S", "NM", "Wid", "M-AF-S", "M-S-A", "Sep")) +
+
+  labs(x = "marital status", title = "Workclass Distribution (Bar Chart)")
+
+```
+
+```{r, eda_plot_3}
+
+p03 = ggplot(data = income_data, aes(x = relationship, fill = income)) +
+  geom_bar() +
+  labs(x = "relationship", title = "Workclass Distribution (Bar Chart)")
+
+```
+
+```{r, eda_plot_4}
+
+p04 = ggplot(data = income_data, aes(x = workclass, fill = income)) +
+  geom_bar() +
+  scale_x_discrete(
+    breaks = c("?", "Never-worked,", "Self-emp-not-inc,", "Federal-gov,", "Private,", "State-gov,", "Local-gov,", "Self-emp-inc,", "Without-pay,"),
+    
+    labels = c("?", "NW", "SENI", "FG", "Priv", "SG", "LG", "SEI", "WO")) +
+
+  labs(x = "workclass", title = "Workclass Distribution (Bar Chart)")
+
+```
+
+```{r, eda_plot_5}
+
+p05 = ggplot(data = income_data, aes(x = years_in_school, fill = income)) +
+  geom_histogram(binwidth = 2) +
+  scale_x_continuous(breaks = seq(1, 25, 2)) +
+  labs(x = "years in school", title = "Years in school (histogram)")
+
+```
+
+```{r, eda_plot_6}
+
+p06 = ggplot(data = income_data, aes(x = hours_per_week, fill = income)) +
+  geom_histogram(binwidth = 5) +
+  scale_x_continuous(breaks = seq(1, 99, 5)) +
+  labs(x = "hours per week", title = "Hours per week distribution (histogram)")
+
+```
+
+```{r, eda_plot_7}
+
+p07 = ggplot(data = income_data, aes(x = occupation, fill = income)) +
+  geom_bar() +
+  scale_x_discrete(
+    breaks = c("?,", "Craft-repair,", "Handlers-cleaners,",
+                              "Priv-house-serv,", "Sales,", "Adm-clerical,",
+                              "Exec-managerial,", "Machine-op-inspct,", "Prof-specialty,", "Tech-support,", "Armed-Forces,", "Farming-fishing,", "Other-service,", "Protective-serv,", "Transport-moving,"),
+    
+    labels = c("?", "CP", "HC", "PHS", "S", "AC", "EM", "MOI", "PS", "TS", "AF", "FF", "OS", "PS", "TM")) +
+  
+  labs(x = "occupation", title = "Occupation Distribution (Bar Chart)")
+
+```
+
+```{r, eda_plot_8}
+
+p08 = ggplot(data = income_data, aes(x = sex, fill = income)) +
+  geom_bar() +
+  labs(x = "sex", title = "Sex Distribution (Bar Chart)")
+
+```
+
+```{r, eda_plot_9}
+
+p09 = ggplot(data = income_data, aes(x = race, fill = income)) +
+  geom_bar() +
+  labs(x = "race", title = "Race Distribution (Bar Chart)")
+
+```
+
+```{r, plot_01, fig.height = 3.5}
+
+# gridExtra::grid.arrange(p01, ncol = 1)
+
+p01
+
+```
+
+```{r, plots, fig.width = 15}
+
+gridExtra::grid.arrange(p02, p03, ncol = 2)
+gridExtra::grid.arrange(p04, p05, ncol = 2)
+gridExtra::grid.arrange(p06, p07, ncol = 2)
+gridExtra::grid.arrange(p08, p09, ncol = 2)
+
+```
+
+## References
+
+[^1]: [Article 1, Section 2 of the U.S. Constitution](https://www.census.gov/history/pdf/Article_1_Section_2.pdf)
+[^2]: [U.S. Census Bureau](https://www.census.gov/)
+[^3]: [Economics and Statistics Administration](https://www.selectusa.gov/iiwg-doc-esa)
+[^4]: [CPI Inflation Calculator](https://www.in2013dollars.com/us/inflation/1994?amount=50000)
+[^5]: [UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/datasets/census+income)
+[^6]: [Support Vector Machines, Clearly Explained](https://www.youtube.com/watch?v=efR1C6CvhmE)
+[^7]: [AdaBoost, Clearly Explained](https://www.youtube.com/watch?v=LsK-xG1cLYA)
+[^8]: [StatQuest: Random Forests Part 1 - Building, Using and Evaluating](https://www.youtube.com/watch?v=J4Wdy0Wc_xQ&t=175s)
+[^9]: [Gradient Boost Part 1: Regression Main Ideas](https://www.youtube.com/watch?v=3CC4N4z3GJc)
+[^10]: [But what is a Neural Network? | Deep learning, chapter 1](https://www.youtube.com/watch?v=aircAruvnKk)
+[^11]: [Naive Bayes Classifier - Fun and Easy Machine Learning](https://www.youtube.com/watch?v=CPqOCI0ahss)
+[^12]: [SMOTE: Synthetic Minority Over-sampling Technique](https://www.youtube.com/watch?v=FheTDyCwRdE)
